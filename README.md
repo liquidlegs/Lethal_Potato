@@ -1,4 +1,7 @@
 # Lethal_Potato
+
+![potato](https://github.com/liquidlegs/Lethal_Potato/blob/main/images/potato.gif)
+
 Lethal Potato is a very basic multithreaded port scanner that can produce blazing fast results.
 What was originally a project that I undertook over the weekend to see how much performance I could sqeeze out my machine while using as little resources as possible, became a useful tool.
 
