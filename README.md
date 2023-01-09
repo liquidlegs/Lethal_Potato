@@ -27,7 +27,7 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 You will find the executable under /target/build/
 
 # Known issues
-## How come I see no results after a scan finishes even if Nmap says they're open?
+## How come I see no results after a scan finishes even if Nmap says there are ports open?
 The application isn't smart enough to determine the average server response time against the target. Therefore before you begin the scan you need to make a guesstimate about the average server response time + add 200-300ms to make up for the huge amount of network traffic the server has to deal with.
 
 ## Why does Lethal_potato execute more threads than what I asked for?
