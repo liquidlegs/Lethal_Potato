@@ -1,7 +1,6 @@
 mod arguments;
 use arguments::{Arguments, display_help};
 use clap::Parser;
-use std::ops::Rem;
 
 fn main() {
   let display: Vec<String> = std::env::args().collect();
