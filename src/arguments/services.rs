@@ -157,11 +157,14 @@ pub fn service_map(service: &str) -> Option<&'static str> {
    "5678" =>  { Some("rrac") }
    "5679" =>  { Some("dccm") }
    "5720" =>  { Some("ms-licensing") }
+   "5985" =>  { Some("wsman") }
+   "5986" =>  { Some("winrm-ssl") }
    "6073" =>  { Some("directplay8") }
    "7680" =>  { Some("ms-do") }
    "8733" =>  { Some("ibus") }
    "9000" =>  { Some("cslistener") }
    "9001" =>  { Some("tor-orport") }
+   "9389" =>  { Some("adws") }
    "9535" =>  { Some("man") }
    "9753" =>  { Some("rasadv") }
    "11320" => { Some("imip-channels") }
