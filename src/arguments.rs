@@ -42,7 +42,26 @@ pub struct Arguments {
 }
 
 // Displays help information.
-pub fn display_help(bin: &str) -> () {
+pub fn display_help(bin: String) -> () {
+  let mut bin_name = String::new();
+  let mut split_bin: Vec<&str> = bin.split("/").collect();
+  
+  if split_bin.len() > 1 {
+    bin_name.push_str(split_bin[split_bin.len()-1]);
+  }
+
+  else {
+    split_bin = bin.split("\\").collect();
+    
+    if split_bin.len() > 1 {
+      bin_name.push_str(split_bin[split_bin.len()-1]);
+    }
+
+    else {
+      bin_name = bin;
+    }
+  }
+  
   println!(
 "
 {} - {}
@@ -62,7 +81,7 @@ pub fn display_help(bin: &str) -> () {
     -T, --{} <THREADS>         The number of threads [default: 650]
         --{}                   Display verbose information about the port scan", 
   style("lethal_potato").red().bright(), style(VERSION).yellow().bright(), style(AUTHOR).yellow().bright(), 
-  style("USAGE").yellow(), bin, style("ARGS").yellow(), style("OPTIONS").yellow(), style("debug").cyan(), 
+  style("USAGE").yellow(), bin_name, style("ARGS").yellow(), style("OPTIONS").yellow(), style("debug").cyan(), 
   style("help").cyan(), style("ports").cyan(), style("timeout").cyan(), style("threads").cyan(), style("verbose").cyan()
   );
 }

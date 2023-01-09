@@ -7,7 +7,7 @@ fn main() {
   if display.len() > 1 {
     match display[1].as_str() {
       "--help" => {
-        display_help(display[0].as_str());
+        display_help(display[0].clone());
       }
 
       _ => {}
