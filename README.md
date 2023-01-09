@@ -34,4 +34,8 @@ The application isn't smart enough to determine the average server response time
 As an example, if you scan 1024 ports with 650 threads you may use up to 1024 threads. This is because threads are allocated ports to scan in segments, meaning that if we calculate 1024/650 we get 1.5. Since it makes no sense to scan half a port, we have to round down to 1 and allocate 1 port per thread to 1000 threads + 24 to scan all 1024 ports. You can figure out the correct number of threads to use by calculating "total_number_of_ports/2".
 
 ## Sometimes ports are occasionally rescanned.
-It will be fixed soon.
+I am aware of the issue and it will be fixed soon.
+
+## How come linux version looks so dark and the windows version looks so bright?
+Lethal Potato was originally written and tested on the windows terminal.
+That being said, I will giving the linux version some love so that it looks bright colourful also.
