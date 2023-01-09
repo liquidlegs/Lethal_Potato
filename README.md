@@ -17,6 +17,10 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 - Display closed ports
 - Supports Windows and Linux
 
+## Features to come
+- Banner grabbing
+- Export as json
+
 # Compilation Instructions
 1) Download and install rustup https://www.rust-lang.org/
 2) Add the cargo to your path
