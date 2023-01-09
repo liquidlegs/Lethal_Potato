@@ -16,3 +16,10 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 - Display debug messages
 - Display closed ports
 - Supports Windows and Linux
+
+# Compilation Instructions
+1) Download and install rustup https://www.rust-lang.org/
+2) Add the cargo to your path
+3) cd into the project directory
+4) Run the following command > Cargo build --release
+5) Navigate to /target/build/project_executable_name>
