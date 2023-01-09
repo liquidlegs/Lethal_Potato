@@ -39,6 +39,6 @@ As an example, if you scan 1024 ports with 650 threads you may use up to 1024 th
 ## Sometimes ports are occasionally rescanned.
 I am aware of the issue and it will be fixed soon.
 
-## How come linux version looks so dark and the windows version looks so bright?
+## How come the linux version looks so dark and the windows version looks so bright?
 Lethal Potato was originally written and tested on the windows terminal.
 That being said, I will giving the linux version some love so that it looks bright colourful also.
