@@ -236,8 +236,6 @@ impl Arguments {
       for i in port_start..port_end+1 {
         address.ports.push(i as u16);
       }
-
-      println!("address.ports = {}", address.ports[address.ports.len()-1]);
     }
     
     // Ports are generated and pushed into the vec based on comma separated values.
