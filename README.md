@@ -29,7 +29,7 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 4) Run the following command
 5) `Cargo build --release`
 
-You will find the executable under /target/build/
+You will find the executable under `/target/build/`
 
 # Known issues
 ## How come I see no results after a scan finishes even if Nmap says there are ports open?
