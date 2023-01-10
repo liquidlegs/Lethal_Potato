@@ -27,7 +27,7 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 2) Add the cargo to your path
 3) cd into the project directory
 4) Run the following command
-5) > Cargo build --release
+5) `Cargo build --release`
 
 You will find the executable under /target/build/
 
