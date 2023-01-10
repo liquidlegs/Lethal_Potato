@@ -35,7 +35,7 @@ You will find the executable under `/target/build/`
 ## How come I see no results after a scan finishes even if Nmap says there are ports open?
 The application isn't smart enough to determine the average server response time against the target. Therefore before you begin the scan you need to make a guesstimate about the average server response time + add 200-300ms to make up for the huge amount of network traffic the server has to deal with.
 
-Obtaining the client response time can be done by using the "ping" utility.
+Obtaining the client response time can be done by using the `ping` utility.
 
 ## Why does Lethal_potato execute more threads than what I asked for?
 As an example, if you scan 1024 ports with 650 threads you may use up to 1024 threads. This is because threads are allocated ports to scan in segments, meaning that if we calculate 1024/650 we get 1.5. Since it makes no sense to scan half a port, we have to round down to 1 and allocate 1 port per thread to 1000 threads + 24 to scan all 1024 ports. You can figure out the correct number of threads to use by calculating "total_number_of_ports/2".
