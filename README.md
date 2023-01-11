@@ -9,8 +9,8 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 
 ## Features
 - Fast and lightweight
-- Scan ports in a range (1-1024)
-- Scan port individually (80,443,445)
+- Scan ports in a range
+- Scan port individually
 - Customizable threads
 - Customizable socket timeout
 - Display verbose output
