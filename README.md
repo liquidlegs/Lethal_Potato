@@ -46,3 +46,6 @@ I am aware of the issue and it will be fixed soon.
 ## How come the linux version looks so dark and the windows version looks so bright?
 Lethal Potato was originally written and tested on the windows terminal.
 That being said, I will giving the linux version some love so that it looks bright colourful also.
+
+## Why are some ports reported as open when nmap reports them as being closed?
+This is a bug. There should be an update that fixes this soon.
