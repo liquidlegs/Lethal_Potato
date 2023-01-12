@@ -124,21 +124,22 @@ impl Flags {
   }
 }
 
-
-#[derive(Debug, Clone, PartialEq, clap::ValueEnum)]
+// Tells the code what operating system is being used.
+#[derive(Debug, Clone, PartialEq)]
 pub enum OperatingSystem {
   Windows,
   Linux,
   Unknown,
 }
 
-
+// Stores the application settings.
 #[derive(Debug, Clone)]
 pub struct ArgumentSettings {
   pub is_valid_output_path: bool,
   pub os: OperatingSystem,
 }
 
+// Tells the code what operating system is in use and how the app should run based on the application settings.
 impl ArgumentSettings {
   pub fn new() -> ArgumentSettings {
     let mut operating_system = OperatingSystem::Unknown;
@@ -164,20 +165,24 @@ impl ArgumentSettings {
   }
 }
 
-
+// Structure is used for writing output for json files.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileOutput {
-  pub ip_address: String,
+  pub host: String,
+  pub ip: String,
   pub protocol: String,
-  pub ports: Vec<u16>
+  pub ports: Vec<u16>,
+  pub banner_response: String,
 }
 
 impl FileOutput {
   pub fn new() -> FileOutput {
     FileOutput {
-      ip_address: String::new(),
+      host: String::new(),
+      ip: String::from("V4"),
       protocol: String::from("TCP"), 
-      ports: Default::default()
+      ports: Default::default(),
+      banner_response: String::from("None"),
     }
   }
 }
@@ -215,6 +220,11 @@ impl IpData {
 
 impl Arguments {  
 
+  /**Function returns the full path from the present working directory
+   * Params:
+   *  nothing
+   * Returns String
+   */
   pub fn get_current_directory() -> String {
     let mut out = String::new();
     
@@ -254,7 +264,7 @@ impl Arguments {
 
     // Check if the output path was provided.
     if let Some(p) = self.output.clone() {
-      let mut path = p.clone();
+      path = p.clone();
       
       // Prepare the new file path depending on the operating system.
       if os == OperatingSystem::Windows {
@@ -272,7 +282,7 @@ impl Arguments {
           path.push('/');
         }
         
-        path = format!("{}/{}{}-output.json", full_path, path, &time_date[0..16]);
+        path = format!("{}{}-output.json", path, &time_date[0..16]);
         c_path = path.clone();
         path_slice = c_path.as_str();
       }
@@ -283,12 +293,12 @@ impl Arguments {
       let mut out = false;
       
       match OpenOptions::new().create(true).read(true).write(true).open(path) {
-        Ok(s) => {
+        Ok(_) => {
           out = true
         },
-        Err(e) => {
+        Err(_) => {
           match File::create(path_slice.clone()) {
-            Ok(s) => {
+            Ok(_) => {
               if self.debug == true {
                 fmt::f_debug("successfully created file", path_slice.clone());
               }
@@ -313,7 +323,7 @@ impl Arguments {
     };
 
     // Writes the json data to the file.
-    let mut write_file = |path: &str, buffer: String| -> bool {
+    let write_file = |path: &str, buffer: String| -> bool {
       let mut out = false;
       
       match OpenOptions::new().read(true).write(true).open(path) {
@@ -362,7 +372,7 @@ impl Arguments {
   pub fn check_valid_directory(&self) -> bool {
     let mut path = String::new();            // Stores the path provided by the user.
     let mut c_path = String::new();
-    let mut valid_path = false;                     // Flag determines if we can write output in the directory.
+    let mut valid_path = false;                // Flag determines if we can write output in the directory.
 
     // Check if a path was provided.
     if let Some(p )= self.output.clone() {
@@ -514,8 +524,6 @@ impl Arguments {
       for i in port_start..port_end+1 {
         address.ports.push(i as u16);
       }
-
-      println!("address.ports = {}", address.ports[address.ports.len()-1]);
     }
     
     // Ports are generated and pushed into the vec based on comma separated values.
@@ -584,7 +592,7 @@ impl Arguments {
       }
 
       if settings.is_valid_output_path == true {
-        file_output.ip_address = address.ip().to_string();
+        file_output.host = address.ip().to_string();
         file_output.ports = writable_ports;
         file_output.ports.sort();
 
@@ -598,7 +606,7 @@ impl Arguments {
       self.init_threads(ip, &mut writable_ports, settings.clone());
       
       if settings.is_valid_output_path == true {             // Checks that output will be written to a valid directory before writing to the disk.
-        file_output.ip_address = address.ip().to_string();   // Data structure will be used for creating the json object.
+        file_output.host = address.ip().to_string();   // Data structure will be used for creating the json object.
         file_output.ports = writable_ports;
         file_output.ports.sort();
 
@@ -620,7 +628,7 @@ impl Arguments {
       Ok(s) => {
         write_ports.push(address.port());
 
-        if let Some(port_name) = service_map(format!("{}", address.port()).as_str()) {
+        if let Some(port_name) = service_map(address.port()) {
           println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
           style(port_name).cyan());
         }
@@ -808,7 +816,7 @@ impl Arguments {
         // We will loop here and wait any incoming messages from worker thread about open ports
         match main_recv.recv_timeout(Duration::from_millis(self.timeout)) {
           Ok(s) => {
-            let mut str_clone = s.clone();
+            let str_clone = s.clone();
             let mut split_msg: Vec<&str> = Default::default();
   
             // If we receive a message with a single 0, we do nothing.
@@ -894,15 +902,27 @@ impl Arguments {
       
       match TcpStream::connect_timeout(&address, Duration::from_millis(th_timeout)) {
         Ok(_) => {
-          Self::thread_send_message(send.clone(), address.port(), true);
 
-          if let Some(port_name) = service_map(format!("{}", address.port()).as_str()) {
-            println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
-            style(port_name).cyan());
+          // If a port was successfully found to be open, the thread will rescan the port just to be sure.
+          if let Ok(stream) = Self::quick_scan(&address, th_timeout.clone()) {
+
+            // A message is sent to the main thread containing the open port.
+            Self::thread_send_message(send.clone(), address.port(), true);
+
+            if let Some(port_name) = service_map(address.port()) {
+              println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
+              style(port_name).cyan());
+            }
+
+            else {
+              Self::thread_send_message(send.clone(), address.port(), false);
+              println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright())
+            };
           }
+
           else {
-            println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright())
-          };
+            Self::thread_send_message(send.clone(), address.port(), false);
+          }
         },
 
         Err(_) => {
@@ -939,8 +959,16 @@ impl Arguments {
     
     // Sends a message to the main thread every 50ms.
     match send.send_timeout(msg, Duration::from_millis(50)) {
-      Ok(s) => {},
-      Err(e) => {}
+      Ok(_) => {},
+      Err(_) => {}
+    }
+  }
+
+
+  pub fn quick_scan(address: &SocketAddr, timeout: u64) -> Result<TcpStream, std::io::Error> {
+    match TcpStream::connect_timeout(&address, Duration::from_millis(timeout*2)) {
+      Ok(s) => { Ok(s) },
+      Err(e) => { Err(e) }
     }
   }
 }
