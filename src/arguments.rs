@@ -93,8 +93,8 @@ pub fn display_help(bin: String) -> () {
 {}:
         --{}                          Displays debug information
     -h, --{}                           Displays help information
-    -b, --{}                         Sends a GET request to the port and records the response
-        --{}   <BANNER>          Sets the maxium response length for a banner grab
+    -b, --{}                    Sends a GET request to the port and records the response
+        --{}   <LEN>             Sets the maxium response length for a banner grab [default: 256]
     -o, --{}       <OUTPUT>          Exports open ports to a json file
     -p, --{}        <PORTS>           Ports to scan. Example: 1-1024, 1,2,3,4 [default: 1-65535]
     -t, --{}      <TIMEOUT>         The timeout in ms before a port is dropped [default: 300]
