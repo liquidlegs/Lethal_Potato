@@ -21,6 +21,8 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 - Export as json
 - Display the recommended max threads
 - Auto calcuate socket timeout
+- UDP scanning
+- IPV6 support
 
 # Compilation Instructions
 1) Download and install rustup https://www.rust-lang.org/
