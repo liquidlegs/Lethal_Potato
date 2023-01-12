@@ -50,4 +50,4 @@ Lethal Potato was originally written and tested on the windows terminal.
 That being said, I will giving the linux version some love so that it looks bright colourful also.
 
 ## Why are some ports reported as open when nmap reports them as being closed?
-This is a bug. There should be an update that fixes this soon.
+This has been fixed. `git pull` or `git clone` this repository again to update to the latest version.
