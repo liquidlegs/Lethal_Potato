@@ -19,7 +19,7 @@ const MIN_PORT: u32 = 1;
 const MAX_PORT: u32 = 65535;
 
 #[derive(Debug, Parser, Clone)]
-#[clap(author, version, about)]
+#[clap(author, version, about, help = "")]
 pub struct Arguments {
   #[clap(value_parser)]
   /// Ip Address
