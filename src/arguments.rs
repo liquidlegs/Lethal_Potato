@@ -48,6 +48,14 @@ pub struct Arguments {
   #[clap(short = 'T', long, default_value = "650")]
   /// TThe number of threads
   pub threads: u32,
+
+  #[clap(short, long, default_value_if("bannergrab", Some("false"), Some("true")), min_values(0))]
+  /// Make a get request on each port to grab the banner.
+  pub banner_grab: bool,
+
+  #[clap(long, default_value = "256")]
+  /// Set the max length of a banner grab.
+  pub banner_len: u32,
 }
 
 // Displays help information.
@@ -83,16 +91,19 @@ pub fn display_help(bin: String) -> () {
     <IP>    IP Address
 
 {}:
-        --{}                     Displays debug information
-    -h, --{}                      Displays help information
-    -o, --{}  <OUTPUT>          Exports open ports to a json file
-    -p, --{}   <PORTS>           Ports to scan. Example: 1-1024, 1,2,3,4 [default: 1-65535]
-    -t, --{} <TIMEOUT>         The timeout in ms before a port is dropped [default: 300]
-    -T, --{} <THREADS>         The number of threads [default: 650]
-        --{}                   Display verbose information about the port scan", 
+        --{}                          Displays debug information
+    -h, --{}                           Displays help information
+    -b, --{}                    Sends a GET request to the port and records the response
+        --{}   <LEN>             Sets the maxium response length for a banner grab [default: 256]
+    -o, --{}       <OUTPUT>          Exports open ports to a json file
+    -p, --{}        <PORTS>           Ports to scan. Example: 1-1024, 1,2,3,4 [default: 1-65535]
+    -t, --{}      <TIMEOUT>         The timeout in ms before a port is dropped [default: 300]
+    -T, --{}      <THREADS>         The number of threads [default: 650]
+        --{}                        Display verbose information about the port scan", 
   style("lethal_potato").red().bright(), style(VERSION).yellow().bright(), style(AUTHOR).yellow().bright(), 
   style("USAGE").yellow(), bin_name, style("ARGS").yellow(), style("OPTIONS").yellow(), style("debug").cyan(), 
-  style("help").cyan(), style("output").cyan(), style("ports").cyan(), style("timeout").cyan(), style("threads").cyan(), style("verbose").cyan()
+  style("help").cyan(), style("banner-grab").cyan(), style("banner-len").cyan(), style("output").cyan(), 
+  style("ports").cyan(), style("timeout").cyan(), style("threads").cyan(), style("verbose").cyan()
   );
 }
 
@@ -115,12 +126,28 @@ pub struct Flags {
   pub debug: bool,
   pub verbose: bool,
   pub timeout: u64,
+  pub banner_grab: bool,
+  pub banner_len: u32,
 }
 
 
 impl Flags {
-  pub fn new(debug: bool, verbose: bool, timeout: u64) -> Flags {
-    Flags { debug: debug, verbose: verbose, timeout: timeout }
+  pub fn new() -> Flags {
+    Flags {
+      debug: false,
+      timeout: 0,
+      verbose: false,
+      banner_grab: false,
+      banner_len: 0,
+    }
+  }
+
+  pub fn set_flags(&mut self, debug: bool, timeout: u64, verbose: bool, banner_grab: bool, banner_len: u32) -> () {
+    self.debug = debug;
+    self.verbose = verbose;
+    self.timeout = timeout;
+    self.banner_grab = banner_grab;
+    self.banner_len = banner_len;
   }
 }
 
@@ -165,6 +192,28 @@ impl ArgumentSettings {
   }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ThreadMessage {
+  OpenPort,
+  Banner,
+  KeepAlive,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BannerResponse {
+  port: u16,
+  data: String
+}
+
+impl BannerResponse {
+  pub fn new() -> BannerResponse {
+    BannerResponse {
+      port: 0,
+      data: String::new(),
+    }
+  }
+}
+
 // Structure is used for writing output for json files.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileOutput {
@@ -172,7 +221,7 @@ pub struct FileOutput {
   pub ip: String,
   pub protocol: String,
   pub ports: Vec<u16>,
-  pub banner_response: String,
+  pub banner_response: Vec<BannerResponse>
 }
 
 impl FileOutput {
@@ -182,7 +231,7 @@ impl FileOutput {
       ip: String::from("V4"),
       protocol: String::from("TCP"), 
       ports: Default::default(),
-      banner_response: String::from("None"),
+      banner_response: Default::default(),
     }
   }
 }
@@ -260,7 +309,6 @@ impl Arguments {
     let mut time_date = format!("{}", time);
     time_date = time_date.replace("-", "");
     time_date = time_date.replace(":", "-");
-    println!("time_date {}", time_date);
 
     // Check if the output path was provided.
     if let Some(p) = self.output.clone() {
@@ -330,7 +378,7 @@ impl Arguments {
         Ok(mut f) => {
           match f.write(buffer.as_bytes()) {
             Ok(s) => {
-              println!("{}: successfully wrote {} bytes to file {}", style("OK").yellow().bright(), style(s).cyan(),style(path).cyan());
+              println!("\n{}: successfully wrote {} bytes to file\n{}", style("OK").yellow().bright(), style(s).cyan(),style(path).cyan());
               out = true;
             },
             Err(e) => {
@@ -577,7 +625,8 @@ impl Arguments {
     println!("");
 
     let mut file_output = FileOutput::new();
-    let mut writable_ports: Vec<u16> = Default::default();
+    let mut write_ports: Vec<u16> = Default::default();
+    let mut banner_resp: Vec<BannerResponse> = Default::default();
     let mut address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(ip.a, ip.b, ip.c, ip.d)), 1);
     let ports = ip.ports.clone();
 
@@ -588,12 +637,12 @@ impl Arguments {
 
       for i in ports {
         address.set_port(i);
-        self.standard_port_scan(address, &mut writable_ports);
+        self.standard_port_scan(address, &mut write_ports);
       }
 
       if settings.is_valid_output_path == true {
         file_output.host = address.ip().to_string();
-        file_output.ports = writable_ports;
+        file_output.ports = write_ports;
         file_output.ports.sort();
 
         self.write_output(settings.os.clone(), file_output);
@@ -603,12 +652,12 @@ impl Arguments {
     }
 
     else if self.threads > 1 {
-      self.init_threads(ip, &mut writable_ports, settings.clone());
+      self.init_threads(ip, &mut write_ports, &mut banner_resp);
       
       if settings.is_valid_output_path == true {             // Checks that output will be written to a valid directory before writing to the disk.
         file_output.host = address.ip().to_string();   // Data structure will be used for creating the json object.
-        file_output.ports = writable_ports;
-        file_output.ports.sort();
+        file_output.ports = write_ports;
+        file_output.banner_response = banner_resp;
 
         self.write_output(settings.os.clone(), file_output);
       }
@@ -651,9 +700,14 @@ impl Arguments {
    *  ip:   IpData {The structure that holds the ip address and ports to be scanned}
    * Returns nothing.
    */
-  pub fn init_threads(&self, ip: IpData, write_ports: &mut Vec<u16>, settings: ArgumentSettings) -> () {
-    let flags = Flags::new(
-      self.debug.clone(), self.verbose.clone(), self.timeout.clone()
+  pub fn init_threads(&self, ip: IpData, write_ports: &mut Vec<u16>, banner_resp: &mut Vec<BannerResponse>) -> () {
+    let mut flags = Flags::new();
+    flags.set_flags(
+      self.debug.clone(), 
+      self.timeout.clone(), 
+      self.verbose.clone(), 
+      self.banner_grab.clone(),
+      self.banner_len.clone()
     );
 
     let scanable_ports = ip.ports.clone();
@@ -808,58 +862,76 @@ impl Arguments {
       }
     }
 
-    if settings.is_valid_output_path == true {
       
-      let mut timeout_counter = 0;
-      while timeout_counter < 10 {
-        
-        // We will loop here and wait any incoming messages from worker thread about open ports
-        match main_recv.recv_timeout(Duration::from_millis(self.timeout)) {
-          Ok(s) => {
-            let str_clone = s.clone();
-            let mut split_msg: Vec<&str> = Default::default();
-  
-            // If we receive a message with a single 0, we do nothing.
-            // However, if we receive  "number open" we will push the u16 value to a vec.
-            match s.as_str() {
-              "0" => {}
-              _ => {
-                split_msg = str_clone.split(" ").collect();
-  
-                if split_msg.len() > 1 {
+    let mut timeout_counter = 0;
+    while timeout_counter < 10 {
+      
+      // We will loop here and wait any incoming messages from worker thread about open ports
+      match main_recv.recv_timeout(Duration::from_millis(self.timeout)) {
+        Ok(s) => {
+          let str_clone = s.clone();
+          let mut split_msg: Vec<&str> = Default::default();
+
+          // If we receive a message with a single 0, we do nothing.
+          // However, if we receive  "number open" we will push the u16 value to a vec.
+          match s.as_str() {
+            "0" => {}
+            _ => {
+              split_msg = str_clone.split("[_]").collect();
+
+              if split_msg.len() > 1 {
+
+                let th_message = Self::validate_thread_message(split_msg[0]);
+                if th_message == ThreadMessage::OpenPort {
                   if self.debug == true {
-                    println!("added port {}", split_msg[0]);
-                    fmt::f_debug("added port to output vec", split_msg[0]);
+                    println!("added port {}", split_msg[1]);
+                    fmt::f_debug("added port to output vec", split_msg[1]);
                   }
-  
-                  let port = Self::parse_u32(split_msg[0]);
-                  write_ports.push(port as u16);
+                  
+                  let port = Self::parse_u32(split_msg[1]);
+                  if port > 0{
+                    write_ports.push(port as u16);
+                    println!("{} port(s) found", style(write_ports.len()).cyan());
+                  }
+                }
+
+                else if th_message == ThreadMessage::Banner {
+                  if self.debug == true {
+                    println!("found banner response");
+                    fmt::f_debug("Banner response found for port", format!("{} {}", split_msg[1], split_msg[2]).as_str());
+                  }
+
+                  let mut banner = BannerResponse::new();
+                  let port = Self::parse_u32(split_msg[1]);
+
+                  banner.port = port as u16;
+                  banner.data = format!("{}", split_msg[2]);
+                  banner_resp.push(banner);
                 }
               }
             }
-          },
-  
-          Err(e) => {
-            if e == RecvTimeoutError::Timeout {
-              timeout_counter += 1;   // This determines how long main_recv will wait before we join each thread.
-              
-              if self.debug == true {
-                fmt::f_debug("Time before channel is dropped", format!("{}", timeout_counter).as_str());
-              }
+          }
+        },
+
+        Err(e) => {
+          if e == RecvTimeoutError::Timeout {
+            timeout_counter += 1;   // This determines how long main_recv will wait before we join each thread.
+            
+            if self.debug == true {
+              fmt::f_debug("Time before channel is dropped", format!("{}", timeout_counter).as_str());
             }
-  
-            if e == RecvTimeoutError::Disconnected {
-              break;
-            }
+          }
+
+          if e == RecvTimeoutError::Disconnected {
+            break;
           }
         }
       }
-  
-      // Closes and drops the main channel sender and receiver from memory.
-      drop(main_recv);
-      drop(th_sender);
     }
 
+    // Closes and drops the main channel sender and receiver from memory.
+    drop(main_recv);
+    drop(th_sender);
 
     std::thread::sleep(Duration::from_secs(2));
     // Thread handles are joined the main thread here.
@@ -872,21 +944,54 @@ impl Arguments {
         }
       }
     }
+
+    // Sorts the ports received by the main threads and displays them to the screen.
+    println!("");
+    write_ports.sort();
+
+    let c_write_ports = write_ports.clone();
+    for i in c_write_ports {
+      Self::display_port(i);
+    }
+
+    println!("");
+    for i in banner_resp.clone() {
+      println!("Port: {}\nbanner: {}\n", style(i.port).cyan(), style(i.data).cyan());
+    }
   }
+
+  /**Function works out what kind of message was to the main thread and returns with the corresponding thread message enum.
+   * Params:
+   *  slice: &str {The message that was ennt}
+   * Returns ThreadMessage
+   */
+  pub fn validate_thread_message(slice: &str) -> ThreadMessage {
+    let mut out = ThreadMessage::KeepAlive;
+
+    match slice {
+      "PORT" =>     { out = ThreadMessage::OpenPort }
+      "BANNER" =>   { out = ThreadMessage::Banner }
+      _ =>          {}
+    }
+
+    out
+  }
+
 
   /**Function is called by each thread and scans the assigned port chunk.
    * Params:
    *  ip_clone: &mut SocketAddr {The ip address and port structure}
    *  ports:    Vec<u16>        {A vec that contains a list of ports to scan}
-   *  debug:    bool            {Shows debug messages when enabled}
-   *  verbose:  bool            {Shows closed port messages when enabled}
-   *  timeout:  u64             {The time before the socket times out and moves on the next}
+   *  f:        Flags           {Setting we want to apply to the worker threads}
+   *  send:     Sender<String>  {}
    * Returns nothing.
    */
   pub fn thread_run_scan(ip_clone: &mut SocketAddr, ports: Vec<u16>, f: Flags, send: Sender<String>) -> () {
     let th_debug = f.debug.clone();
     let th_timeout = f.timeout.clone();
     let th_verbose = f.verbose.clone();
+    let th_banner_req = f.banner_grab.clone();
+    let th_banner_len = f.banner_len.clone();
     let mut address = ip_clone.clone();
 
     if th_debug == true {
@@ -904,29 +1009,26 @@ impl Arguments {
         Ok(_) => {
 
           // If a port was successfully found to be open, the thread will rescan the port just to be sure.
-          if let Ok(stream) = Self::quick_scan(&address, th_timeout.clone()) {
-
+          if let Ok(_) = Self::quick_scan(&address, th_timeout.clone()) {
+            
             // A message is sent to the main thread containing the open port.
-            Self::thread_send_message(send.clone(), address.port(), true);
-
-            if let Some(port_name) = service_map(address.port()) {
-              println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
-              style(port_name).cyan());
+            Self::thread_send_message(send.clone(), address.port(), String::new(), ThreadMessage::OpenPort);
+            
+            // This line sends a banner request to the main thread if it gets a response.
+            if let Some(data) = Self::get_banner(&address, th_timeout, th_debug, th_banner_len) {
+              if data.len() > 0 && th_banner_req == true {
+                Self::thread_send_message(send.clone(), address.port(), data, ThreadMessage::Banner);
+              }
             }
-
-            else {
-              Self::thread_send_message(send.clone(), address.port(), false);
-              println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright())
-            };
           }
 
           else {
-            Self::thread_send_message(send.clone(), address.port(), false);
+            Self::thread_send_message(send.clone(), address.port(), String::new(), ThreadMessage::KeepAlive);
           }
         },
 
         Err(_) => {
-          Self::thread_send_message(send.clone(), address.port(), false);
+          Self::thread_send_message(send.clone(), address.port(), String::new(), ThreadMessage::KeepAlive);
 
           if th_verbose == true {
             println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Closed").red().bright());
@@ -936,24 +1038,42 @@ impl Arguments {
     }
   }
 
+  pub fn display_port(port: u16) -> () {
+    if let Some(port_name) = service_map(port) {
+      println!("{}: {} - {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright(),
+      style(port_name).cyan());
+    }
+
+    else {
+      println!("{}: {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright())
+    };
+  }
+
   /**Function sends messages from worker thread to the main thread via channels with open ports
    * Params:
-   *  send:      Sender<String> {The sender channel used to send messages to the main thread}
-   *  port:      u16            {The port that was found}
-   *  open_port: bool           {Send a message depending on whether a port is open or closed}
+   *  send:            Sender<String> {The sender channel used to send messages to the main thread}
+   *  port:            u16            {The port that was found}
+   *  data:            String         {The banner response}
+   *  thread_flag:     ThreadMessage  {The type of message to send to the main thread}
    * Returns nothing.
    */
-  pub fn thread_send_message(send: Sender<String>, port: u16, open_port: bool) -> () {
+  pub fn thread_send_message(send: Sender<String>, port: u16, data: String, thread_flag: ThreadMessage) -> () {
     let mut msg = String::new();
 
-    // Send "number #" for open ports.
-    if open_port == true {
-      msg = format!("{} {}", port, "#");
+    // Send "PORT number" for open ports.
+    if thread_flag == ThreadMessage::OpenPort {
+      msg = format!("PORT[_]{}", port);
+    }
+
+    // Send "BANNER number banner_response" for responses longer than 0 bytes.
+    else if thread_flag == ThreadMessage::Banner {
+      msg = format!("BANNER[_]{}[_]{}", port, data);
+      // println!("msg = {}", msg);
     }
     
     // Value is meaningless.
     // This line is used to keep the channel alive.
-    else {
+    else if thread_flag == ThreadMessage::KeepAlive {
       msg.push('0');
     }
     
@@ -965,10 +1085,80 @@ impl Arguments {
   }
 
 
+  /**Function does a quick scan of a single port number and returns whether it was a success or failure.
+   * Params:
+   *  address: &SocketAddr {The ip address and port of the service}
+   *  timeout: u64         {The socket timeout}
+   * Returns Result<TcpStream, std::io::Error>
+   */
   pub fn quick_scan(address: &SocketAddr, timeout: u64) -> Result<TcpStream, std::io::Error> {
     match TcpStream::connect_timeout(&address, Duration::from_millis(timeout*2)) {
       Ok(s) => { Ok(s) },
       Err(e) => { Err(e) }
+    }
+  }
+
+  /**Function makes a get request and returns the response.
+   * Params:
+   *  address:    &SocketAddr {The ip address and port of the service to contact}
+   *  timeout:    u64         {The socket timeout}
+   *  debug:      bool        {Shows debug messages}
+   *  banner_len: u32         {The max response length that the function will return}
+   * Returns Option<String>
+   */
+  pub fn get_banner(address: &SocketAddr, timeout: u64, debug: bool, banner_len: u32) -> Option<String> {
+    let builder = reqwest::blocking::ClientBuilder::new();
+    let client_timeout = builder.timeout(Duration::from_millis(timeout));
+    let url = format!("http://{}:{}/", address.ip().to_string(), address.port());
+    let mut out = String::new();
+
+    match client_timeout.build() {
+      Ok(client) => {
+        match client.get(url.as_str()).send() {
+          Ok(s) => {
+
+            if let Ok(text) = s.text() {
+              if text.len() > 0 {
+                out.push_str(text.as_str());
+              }
+            }
+
+          },
+
+          Err(e) => {
+            if debug == true {
+              fmt::f_error("unable to get response from request", url.as_str(), format!("{}", e).as_str());
+            }
+          }
+        }  
+      },
+
+      Err(e) => {
+        if debug == true {
+          println!("{}: unable to build client request {}ms - {}", style("Error").red(), style(timeout).cyan(), style(e).red());
+        }
+      }
+    }
+
+    if out.len() > 0 {
+      let string_bytes = out.as_str();
+      let mut banner = String::new();
+
+      let mut counter: u32 = 0;
+      for i in string_bytes.chars() {
+        if counter > banner_len {
+          break;  
+        }
+
+        banner.push(i);
+        counter += 1;
+      }
+
+      Some(banner)
+    }
+
+    else {
+      None
     }
   }
 }
