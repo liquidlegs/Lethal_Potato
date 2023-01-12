@@ -652,7 +652,7 @@ impl Arguments {
     }
 
     else if self.threads > 1 {
-      self.init_threads(ip, &mut write_ports, &mut banner_resp, settings.clone());
+      self.init_threads(ip, &mut write_ports, &mut banner_resp);
       
       if settings.is_valid_output_path == true {             // Checks that output will be written to a valid directory before writing to the disk.
         file_output.host = address.ip().to_string();   // Data structure will be used for creating the json object.
@@ -700,7 +700,7 @@ impl Arguments {
    *  ip:   IpData {The structure that holds the ip address and ports to be scanned}
    * Returns nothing.
    */
-  pub fn init_threads(&self, ip: IpData, write_ports: &mut Vec<u16>, banner_resp: &mut Vec<BannerResponse>, settings: ArgumentSettings) -> () {
+  pub fn init_threads(&self, ip: IpData, write_ports: &mut Vec<u16>, banner_resp: &mut Vec<BannerResponse>) -> () {
     let mut flags = Flags::new();
     flags.set_flags(
       self.debug.clone(), 
