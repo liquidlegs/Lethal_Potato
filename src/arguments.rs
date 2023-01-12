@@ -1,9 +1,14 @@
+use chrono::Utc;
 use clap::Parser;
+use std::io::{Write, ErrorKind};
 use std::net::{SocketAddr, Ipv4Addr, IpAddr, TcpStream};
+use std::path::Path;
 use std::process::exit;
 use std::time::Duration;
 use console::style;
-use std::thread;
+use std::{thread, env, fs::{OpenOptions, File}};
+use crossbeam::channel::{unbounded, Sender, RecvTimeoutError};
+use serde::Serialize;
 
 mod services;
 use services::*;
@@ -27,6 +32,10 @@ pub struct Arguments {
   #[clap(long, default_value_if("debug", Some("false"), Some("true")), min_values(0))]
   /// Display debug information.
   pub debug: bool,
+
+  #[clap(short, long)]
+  /// Output open ports to a json.
+  pub output: Option<String>,
 
   #[clap(long, default_value_if("verbose", Some("false"), Some("true")), min_values(0))]
   /// Display verbose information about the port scan
@@ -61,7 +70,7 @@ pub fn display_help(bin: String) -> () {
       bin_name = bin;
     }
   }
-  
+
   println!(
 "
 {} - {}
@@ -76,13 +85,14 @@ pub fn display_help(bin: String) -> () {
 {}:
         --{}                     Displays debug information
     -h, --{}                      Displays help information
+    -o, --{}  <OUTPUT>          Exports open ports to a json file
     -p, --{}   <PORTS>           Ports to scan. Example: 1-1024, 1,2,3,4 [default: 1-65535]
     -t, --{} <TIMEOUT>         The timeout in ms before a port is dropped [default: 300]
     -T, --{} <THREADS>         The number of threads [default: 650]
         --{}                   Display verbose information about the port scan", 
   style("lethal_potato").red().bright(), style(VERSION).yellow().bright(), style(AUTHOR).yellow().bright(), 
   style("USAGE").yellow(), bin_name, style("ARGS").yellow(), style("OPTIONS").yellow(), style("debug").cyan(), 
-  style("help").cyan(), style("ports").cyan(), style("timeout").cyan(), style("threads").cyan(), style("verbose").cyan()
+  style("help").cyan(), style("output").cyan(), style("ports").cyan(), style("timeout").cyan(), style("threads").cyan(), style("verbose").cyan()
   );
 }
 
@@ -99,6 +109,83 @@ pub mod fmt {
   }
 }
 
+
+#[derive(Debug, Clone)]
+pub struct Flags {
+  pub debug: bool,
+  pub verbose: bool,
+  pub timeout: u64,
+}
+
+
+impl Flags {
+  pub fn new(debug: bool, verbose: bool, timeout: u64) -> Flags {
+    Flags { debug: debug, verbose: verbose, timeout: timeout }
+  }
+}
+
+// Tells the code what operating system is being used.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OperatingSystem {
+  Windows,
+  Linux,
+  Unknown,
+}
+
+// Stores the application settings.
+#[derive(Debug, Clone)]
+pub struct ArgumentSettings {
+  pub is_valid_output_path: bool,
+  pub os: OperatingSystem,
+}
+
+// Tells the code what operating system is in use and how the app should run based on the application settings.
+impl ArgumentSettings {
+  pub fn new() -> ArgumentSettings {
+    let mut operating_system = OperatingSystem::Unknown;
+    
+    match env::consts::OS {
+      "windows" =>  {
+        operating_system = OperatingSystem::Windows;
+      },
+
+      "linux" =>    {
+        operating_system = OperatingSystem::Linux;
+      }
+
+      _ =>          {
+        fmt::f_error("Operating system either unknown or not supported", env::consts::OS, "");
+      }
+    }
+
+    ArgumentSettings {
+      is_valid_output_path: false,
+      os: operating_system,
+    }
+  }
+}
+
+// Structure is used for writing output for json files.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileOutput {
+  pub host: String,
+  pub ip: String,
+  pub protocol: String,
+  pub ports: Vec<u16>,
+  pub banner_response: String,
+}
+
+impl FileOutput {
+  pub fn new() -> FileOutput {
+    FileOutput {
+      host: String::new(),
+      ip: String::from("V4"),
+      protocol: String::from("TCP"), 
+      ports: Default::default(),
+      banner_response: String::from("None"),
+    }
+  }
+}
 // Used to determine how ports should be generated.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
@@ -133,6 +220,188 @@ impl IpData {
 
 impl Arguments {  
 
+  /**Function returns the full path from the present working directory
+   * Params:
+   *  nothing
+   * Returns String
+   */
+  pub fn get_current_directory() -> String {
+    let mut out = String::new();
+    
+    match std::env::current_dir() {
+      Ok(path) => {
+        match path.into_os_string().into_string() {
+          Ok(s) => {
+            out = s;
+          },
+          Err(os) => {}
+        }
+      },
+      Err(e) => {}
+    }
+    
+    out
+  }
+
+  /**Function the ip address of the target and discovered ports and writes the output to json file.
+   * Params:
+   *  &mut self
+   *   target: FileOutput {Contains the ip address and open ports found on the target}
+   * Returns nothing. 
+   */
+  pub fn write_output(&self, os: OperatingSystem, target: FileOutput) -> () {
+    let mut path = String::new();                               // Stores the path specified by the user.
+    let mut c_path = String::new();                             
+    let mut json_output = String::new();                        // Stores the output of the created json object.
+    let full_path = Self::get_current_directory();              // The full path to the current directory.
+    let mut path_slice= "";                                       
+
+    let time = Utc::now();                              // The date and time in UTC as a string.
+    let mut time_date = format!("{}", time);
+    time_date = time_date.replace("-", "");
+    time_date = time_date.replace(":", "-");
+    println!("time_date {}", time_date);
+
+    // Check if the output path was provided.
+    if let Some(p) = self.output.clone() {
+      path = p.clone();
+      
+      // Prepare the new file path depending on the operating system.
+      if os == OperatingSystem::Windows {
+        if path.clone().as_bytes()[path.len()-1] != '\\' as u8 {
+          path.push('\\');
+        }
+        
+        path = format!("{}\\{}{}-output.json", full_path, path, &time_date[0..16]);
+        c_path = path.clone();
+        path_slice = c_path.as_str();
+      }
+
+      else if os == OperatingSystem::Linux {
+        if path.clone().as_bytes()[path.len()-1] != '/' as u8 {
+          path.push('/');
+        }
+        
+        path = format!("{}{}-output.json", path, &time_date[0..16]);
+        c_path = path.clone();
+        path_slice = c_path.as_str();
+      }
+    }
+    
+    // Creates a file if it does not already exist.
+    let create_file = move || -> bool {
+      let mut out = false;
+      
+      match OpenOptions::new().create(true).read(true).write(true).open(path) {
+        Ok(_) => {
+          out = true
+        },
+        Err(_) => {
+          match File::create(path_slice.clone()) {
+            Ok(_) => {
+              if self.debug == true {
+                fmt::f_debug("successfully created file", path_slice.clone());
+              }
+
+              out = true;
+            },
+
+            Err(e) => {
+              if e.kind() == ErrorKind::AlreadyExists {
+                out = true;
+              }
+              
+              if e.kind() != ErrorKind::AlreadyExists {
+                fmt::f_error("unable to create file", path_slice.clone(), format!("{}", e).as_str());
+              }
+            }
+          }
+        }
+      }
+
+      out
+    };
+
+    // Writes the json data to the file.
+    let write_file = |path: &str, buffer: String| -> bool {
+      let mut out = false;
+      
+      match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(mut f) => {
+          match f.write(buffer.as_bytes()) {
+            Ok(s) => {
+              println!("{}: successfully wrote {} bytes to file {}", style("OK").yellow().bright(), style(s).cyan(),style(path).cyan());
+              out = true;
+            },
+            Err(e) => {
+              fmt::f_error("unable to write results to file", path, format!("{}", e).as_str());
+            }
+          }
+        },
+
+        Err(e) => {
+          fmt::f_error("unable to write file to disk", path, format!("{}", e).as_str()); 
+        }
+      }
+      
+      out
+    };
+    
+    // Turns the FileOutput structure into a json object.
+    match serde_json::to_string_pretty(&target) {
+      Ok(s) => {
+        json_output = s;
+      },
+      Err(e) => {
+        println!("{}: failed to create json object - {}", style("Error").red(), style(e).red());
+      }
+    }
+
+    let is_file_created = create_file();
+    if is_file_created == true {
+      write_file(path_slice.clone(), json_output);
+    }
+
+  }
+
+  /**Function checks if the path provided by the user is a valid or not.
+   * Params:
+   *  &mut self
+   * Returns bool.
+   */
+  pub fn check_valid_directory(&self) -> bool {
+    let mut path = String::new();            // Stores the path provided by the user.
+    let mut c_path = String::new();
+    let mut valid_path = false;                // Flag determines if we can write output in the directory.
+
+    // Check if a path was provided.
+    if let Some(p )= self.output.clone() {
+      path = p;
+      c_path = path.clone();
+    }
+
+    if Path::new(&path).is_dir() == true {
+      valid_path = true;
+    }
+
+    // Return if the provided path is not a valid directory.
+    else {
+      match std::fs::create_dir(path) {
+        Ok(_) => {
+          valid_path = true;
+          println!("{}: Successfully created output directory {}", style("OK").yellow(), style(c_path).cyan())
+        },
+
+        Err(e) => {
+          fmt::f_error("unable to create directory", c_path.clone().as_str(), format!("{}", e).as_str());
+          exit(1);
+        }
+      }
+    }
+
+    valid_path
+  }
+  
   /**Function parses u8 values.
    * Params:
    *  value: &str {The value to parse as a slice}
@@ -300,13 +569,15 @@ impl Arguments {
    *  &self
    * Returns nothing.
    */
-  pub fn begin_scan(&self) -> () {
+  pub fn begin_scan(&self, settings: ArgumentSettings) -> () {
     // We prepare our network information here.
     let ip = self.create_address();
     println!("{} Starting scan on host {} over {} ports", style("Potato =>").red().bright(),
     style(format!("[{}.{}.{}.{}]", ip.a, ip.b, ip.c, ip.d)).cyan(), style(format!("[{}]", ip.ports.clone().len())).cyan());
     println!("");
 
+    let mut file_output = FileOutput::new();
+    let mut writable_ports: Vec<u16> = Default::default();
     let mut address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(ip.a, ip.b, ip.c, ip.d)), 1);
     let ports = ip.ports.clone();
 
@@ -317,14 +588,31 @@ impl Arguments {
 
       for i in ports {
         address.set_port(i);
-        self.standard_port_scan(address);
+        self.standard_port_scan(address, &mut writable_ports);
+      }
+
+      if settings.is_valid_output_path == true {
+        file_output.host = address.ip().to_string();
+        file_output.ports = writable_ports;
+        file_output.ports.sort();
+
+        self.write_output(settings.os.clone(), file_output);
       }
 
       println!("\n{}: Scan completed in {:?}\n", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
     }
 
     else if self.threads > 1 {
-      self.init_threads(ip);
+      self.init_threads(ip, &mut writable_ports, settings.clone());
+      
+      if settings.is_valid_output_path == true {             // Checks that output will be written to a valid directory before writing to the disk.
+        file_output.host = address.ip().to_string();   // Data structure will be used for creating the json object.
+        file_output.ports = writable_ports;
+        file_output.ports.sort();
+
+        self.write_output(settings.os.clone(), file_output);
+      }
+      
       println!("\n{}: Scan completed in {:?}\n", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
     }
   }
@@ -335,10 +623,12 @@ impl Arguments {
    *  address: SocketAddr {The ip address and port that will be passed to the connect_timeout function}
    * Returns nothing.
   */
-  pub fn standard_port_scan(&self, address: SocketAddr) -> () {
+  pub fn standard_port_scan(&self, address: SocketAddr, write_ports: &mut Vec<u16>) -> () {
     match TcpStream::connect_timeout(&address, Duration::from_millis(self.timeout)) {
-      Ok(_) => {
-        if let Some(port_name) = service_map(format!("{}", address.port()).as_str()) {
+      Ok(s) => {
+        write_ports.push(address.port());
+
+        if let Some(port_name) = service_map(address.port()) {
           println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
           style(port_name).cyan());
         }
@@ -361,15 +651,18 @@ impl Arguments {
    *  ip:   IpData {The structure that holds the ip address and ports to be scanned}
    * Returns nothing.
    */
-  pub fn init_threads(&self, ip: IpData) -> () {
-    let th_timeout = self.timeout.clone();                        // Sets the thread timeout.
-    let th_verbose = self.verbose.clone();                       // Sets the thread verbose flag.
-    let th_debug = self.debug.clone();                           // Sets the thread debug flag.
+  pub fn init_threads(&self, ip: IpData, write_ports: &mut Vec<u16>, settings: ArgumentSettings) -> () {
+    let flags = Flags::new(
+      self.debug.clone(), self.verbose.clone(), self.timeout.clone()
+    );
+
     let scanable_ports = ip.ports.clone();
+    // let mut writable_ports: Vec<u16> = Default::default();
+    let (th_sender, main_recv) = unbounded::<String>();
 
     // The ports per chunk for each thread is calculated.
     let total_ports = ip.ports.len() as u16;
-    let port_chunk = total_ports / self.threads.clone() as u16;
+    let mut port_chunk = total_ports / self.threads.clone() as u16;
     let remainder_chunk = total_ports % self.threads.clone() as u16;
 
     if self.debug == true {
@@ -406,10 +699,12 @@ impl Arguments {
 
       let th_port_chunk = temp_ports.clone();
       let mut ip_clone = address.clone();
+      let c_flags = flags.clone();
+      let sender_clone = th_sender.clone();
       
       // The thread is pushed and stores in a vec of handles upon creation.
       handles.push(thread::spawn(move || {
-        Self::thread_run_scan(&mut ip_clone, th_port_chunk, th_debug, th_verbose, th_timeout);
+        Self::thread_run_scan(&mut ip_clone, th_port_chunk, c_flags, sender_clone);
       }));      
 
       if port_chunk_start as usize + port_chunk as usize > MAX_PORT as usize {
@@ -456,6 +751,10 @@ impl Arguments {
         style("Start").yellow(), style(port_chunk_start).cyan(), style("End").yellow(), style(port_chunk_end).cyan());
       }
 
+      if port_chunk > remainder_chunk {
+        port_chunk = ((remainder_chunk as f32) / 2 as f32) as u16;
+      }
+
       // Push remaining ports into a vec.
       let mut ip_clone = address.clone();
       let mut remainder_ports: Vec<u16> = Default::default();
@@ -473,8 +772,11 @@ impl Arguments {
 
         // Create the thread and clear the port vec through each iteration.
         let th_remainder_ports = remainder_ports.clone();
+        let c_flags = flags.clone();
+        let sender_clone = th_sender.clone();
+
         handles.push(thread::spawn(move || {
-          Self::thread_run_scan(&mut ip_clone, th_remainder_ports, th_debug, th_verbose, th_timeout);
+          Self::thread_run_scan(&mut ip_clone, th_remainder_ports, c_flags, sender_clone);
         }));
         
         remainder_ports.clear();
@@ -506,6 +808,59 @@ impl Arguments {
       }
     }
 
+    if settings.is_valid_output_path == true {
+      
+      let mut timeout_counter = 0;
+      while timeout_counter < 10 {
+        
+        // We will loop here and wait any incoming messages from worker thread about open ports
+        match main_recv.recv_timeout(Duration::from_millis(self.timeout)) {
+          Ok(s) => {
+            let str_clone = s.clone();
+            let mut split_msg: Vec<&str> = Default::default();
+  
+            // If we receive a message with a single 0, we do nothing.
+            // However, if we receive  "number open" we will push the u16 value to a vec.
+            match s.as_str() {
+              "0" => {}
+              _ => {
+                split_msg = str_clone.split(" ").collect();
+  
+                if split_msg.len() > 1 {
+                  if self.debug == true {
+                    println!("added port {}", split_msg[0]);
+                    fmt::f_debug("added port to output vec", split_msg[0]);
+                  }
+  
+                  let port = Self::parse_u32(split_msg[0]);
+                  write_ports.push(port as u16);
+                }
+              }
+            }
+          },
+  
+          Err(e) => {
+            if e == RecvTimeoutError::Timeout {
+              timeout_counter += 1;   // This determines how long main_recv will wait before we join each thread.
+              
+              if self.debug == true {
+                fmt::f_debug("Time before channel is dropped", format!("{}", timeout_counter).as_str());
+              }
+            }
+  
+            if e == RecvTimeoutError::Disconnected {
+              break;
+            }
+          }
+        }
+      }
+  
+      // Closes and drops the main channel sender and receiver from memory.
+      drop(main_recv);
+      drop(th_sender);
+    }
+
+
     std::thread::sleep(Duration::from_secs(2));
     // Thread handles are joined the main thread here.
     for i in handles {
@@ -528,10 +883,11 @@ impl Arguments {
    *  timeout:  u64             {The time before the socket times out and moves on the next}
    * Returns nothing.
    */
-  pub fn thread_run_scan(ip_clone: &mut SocketAddr, ports: Vec<u16>, debug: bool, verbose: bool, timeout: u64) -> () {
-    let th_debug = debug.clone();
-    let th_timeout = timeout.clone();
-    let th_verbose = verbose.clone();
+  pub fn thread_run_scan(ip_clone: &mut SocketAddr, ports: Vec<u16>, f: Flags, send: Sender<String>) -> () {
+    let th_debug = f.debug.clone();
+    let th_timeout = f.timeout.clone();
+    let th_verbose = f.verbose.clone();
+    let mut address = ip_clone.clone();
 
     if th_debug == true {
       let port_range: (u16, u16) = (ports[0], ports[ports.len() as usize -1]);
@@ -542,25 +898,77 @@ impl Arguments {
 
     // Ports are scanned here.
     for i in ports {
-      ip_clone.set_port(i);
+      address.set_port(i);
       
-      match TcpStream::connect_timeout(&ip_clone, Duration::from_millis(th_timeout)) {
+      match TcpStream::connect_timeout(&address, Duration::from_millis(th_timeout)) {
         Ok(_) => {
-          if let Some(port_name) = service_map(format!("{}", ip_clone.port()).as_str()) {
-            println!("{}: {} - {}", style(format!("{}/tcp", ip_clone.port())).yellow().bright(), style("Open").green().bright(),
-            style(port_name).cyan());
+
+          // If a port was successfully found to be open, the thread will rescan the port just to be sure.
+          if let Ok(stream) = Self::quick_scan(&address, th_timeout.clone()) {
+
+            // A message is sent to the main thread containing the open port.
+            Self::thread_send_message(send.clone(), address.port(), true);
+
+            if let Some(port_name) = service_map(address.port()) {
+              println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
+              style(port_name).cyan());
+            }
+
+            else {
+              Self::thread_send_message(send.clone(), address.port(), false);
+              println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright())
+            };
           }
+
           else {
-            println!("{}: {}", style(format!("{}/tcp", ip_clone.port())).yellow().bright(), style("Open").green().bright())
-          };
+            Self::thread_send_message(send.clone(), address.port(), false);
+          }
         },
 
         Err(_) => {
+          Self::thread_send_message(send.clone(), address.port(), false);
+
           if th_verbose == true {
-            println!("{}: {}", style(format!("{}/tcp", ip_clone.port())).yellow().bright(), style("Closed").red().bright());
+            println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Closed").red().bright());
           }
         }
       }
+    }
+  }
+
+  /**Function sends messages from worker thread to the main thread via channels with open ports
+   * Params:
+   *  send:      Sender<String> {The sender channel used to send messages to the main thread}
+   *  port:      u16            {The port that was found}
+   *  open_port: bool           {Send a message depending on whether a port is open or closed}
+   * Returns nothing.
+   */
+  pub fn thread_send_message(send: Sender<String>, port: u16, open_port: bool) -> () {
+    let mut msg = String::new();
+
+    // Send "number #" for open ports.
+    if open_port == true {
+      msg = format!("{} {}", port, "#");
+    }
+    
+    // Value is meaningless.
+    // This line is used to keep the channel alive.
+    else {
+      msg.push('0');
+    }
+    
+    // Sends a message to the main thread every 50ms.
+    match send.send_timeout(msg, Duration::from_millis(50)) {
+      Ok(_) => {},
+      Err(_) => {}
+    }
+  }
+
+
+  pub fn quick_scan(address: &SocketAddr, timeout: u64) -> Result<TcpStream, std::io::Error> {
+    match TcpStream::connect_timeout(&address, Duration::from_millis(timeout*2)) {
+      Ok(s) => { Ok(s) },
+      Err(e) => { Err(e) }
     }
   }
 }
