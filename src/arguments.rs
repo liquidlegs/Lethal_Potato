@@ -8,10 +8,12 @@ use std::time::Duration;
 use console::style;
 use std::{thread, env, fs::{OpenOptions, File}};
 use crossbeam::channel::{unbounded, Sender, RecvTimeoutError};
-use serde::Serialize;
 
 mod services;
+pub mod arg_definitions;
 use services::*;
+use arg_definitions::*;
+use arg_definitions::fmt;
 
 const AUTHOR: &str = "liquidlegs";
 const VERSION: &str = "0.1.0";
@@ -107,166 +109,6 @@ pub fn display_help(bin: String) -> () {
   );
 }
 
-// Module contains simple functions used for displaying different types of messages.
-pub mod fmt {
-  use console::style;
-
-  pub fn f_error(msg: &str, value: &str, error_enum: &str) -> () {
-    println!("{}: {} {} - {}", style("Error").red().bright(), msg, style(value).cyan(), style(error_enum).red());
-  }
-
-  pub fn f_debug(msg: &str, value: &str) -> () {
-    println!("{} {} {}", style("Debug =>").red().bright(), style(msg).yellow(), style(value).cyan());
-  }
-}
-
-
-#[derive(Debug, Clone)]
-pub struct Flags {
-  pub debug: bool,
-  pub verbose: bool,
-  pub timeout: u64,
-  pub banner_grab: bool,
-  pub banner_len: u32,
-}
-
-
-impl Flags {
-  pub fn new() -> Flags {
-    Flags {
-      debug: false,
-      timeout: 0,
-      verbose: false,
-      banner_grab: false,
-      banner_len: 0,
-    }
-  }
-
-  pub fn set_flags(&mut self, debug: bool, timeout: u64, verbose: bool, banner_grab: bool, banner_len: u32) -> () {
-    self.debug = debug;
-    self.verbose = verbose;
-    self.timeout = timeout;
-    self.banner_grab = banner_grab;
-    self.banner_len = banner_len;
-  }
-}
-
-// Tells the code what operating system is being used.
-#[derive(Debug, Clone, PartialEq)]
-pub enum OperatingSystem {
-  Windows,
-  Linux,
-  Unknown,
-}
-
-// Stores the application settings.
-#[derive(Debug, Clone)]
-pub struct ArgumentSettings {
-  pub is_valid_output_path: bool,
-  pub os: OperatingSystem,
-}
-
-// Tells the code what operating system is in use and how the app should run based on the application settings.
-impl ArgumentSettings {
-  pub fn new() -> ArgumentSettings {
-    let mut operating_system = OperatingSystem::Unknown;
-    
-    match env::consts::OS {
-      "windows" =>  {
-        operating_system = OperatingSystem::Windows;
-      },
-
-      "linux" =>    {
-        operating_system = OperatingSystem::Linux;
-      }
-
-      _ =>          {
-        fmt::f_error("Operating system either unknown or not supported", env::consts::OS, "");
-      }
-    }
-
-    ArgumentSettings {
-      is_valid_output_path: false,
-      os: operating_system,
-    }
-  }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ThreadMessage {
-  OpenPort,
-  Banner,
-  KeepAlive,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BannerResponse {
-  port: u16,
-  data: String
-}
-
-impl BannerResponse {
-  pub fn new() -> BannerResponse {
-    BannerResponse {
-      port: 0,
-      data: String::new(),
-    }
-  }
-}
-
-// Structure is used for writing output for json files.
-#[derive(Debug, Clone, Serialize)]
-pub struct FileOutput {
-  pub host: String,
-  pub ip: String,
-  pub protocol: String,
-  pub ports: Vec<u16>,
-  pub banner_response: Vec<BannerResponse>
-}
-
-impl FileOutput {
-  pub fn new() -> FileOutput {
-    FileOutput {
-      host: String::new(),
-      ip: String::from("V4"),
-      protocol: String::from("TCP"), 
-      ports: Default::default(),
-      banner_response: Default::default(),
-    }
-  }
-}
-// Used to determine how ports should be generated.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Pattern {
-  Range,
-  Csv,
-  Single,
-  Unknown,
-}
-
-// Struct stores the ip address information and a vec
-// containing all the ports to be scanned.
-#[derive(Debug, Clone)]
-pub struct IpData {
-  a: u8,
-  b: u8,
-  c: u8,
-  d: u8,
-  ports: Vec<u16>,
-}
-
-impl IpData {
-  pub fn new() -> IpData {
-    IpData {
-      a: 0,
-      b: 0,
-      c: 0,
-      d: 0,
-      ports: Default::default(),
-    }
-  }
-}
-
 impl Arguments {  
 
   /**Function returns the full path from the present working directory
@@ -309,6 +151,7 @@ impl Arguments {
     let mut time_date = format!("{}", time);
     time_date = time_date.replace("-", "");
     time_date = time_date.replace(":", "-");
+    time_date = time_date.replace(" ", "_");
 
     // Check if the output path was provided.
     if let Some(p) = self.output.clone() {
@@ -330,7 +173,7 @@ impl Arguments {
           path.push('/');
         }
         
-        path = format!("{}{}-output.json", path, &time_date[0..16]);
+        path = format!("{}{:?}-output.json", path, &time_date[0..16]);
         c_path = path.clone();
         path_slice = c_path.as_str();
       }
@@ -545,7 +388,7 @@ impl Arguments {
 
     // Get the port string if it exists.
     if let Some(port) = self.ports.clone() {
-      port_string = port;
+      port_string.push_str(port.as_str());
     }
     
     // We will scan all ports if no port string exists.
@@ -637,13 +480,25 @@ impl Arguments {
 
       for i in ports {
         address.set_port(i);
-        self.standard_port_scan(address, &mut write_ports);
+        self.standard_port_scan(address, &mut write_ports, &mut banner_resp);
+      }
+
+      write_ports.sort();
+
+      let c_write_ports = write_ports.clone();
+      for i in c_write_ports {
+        fmt::f_display_port(i);
+      }
+
+      println!("");
+      for i in banner_resp.clone() {
+        fmt::f_display_banner(i);
       }
 
       if settings.is_valid_output_path == true {
         file_output.host = address.ip().to_string();
         file_output.ports = write_ports;
-        file_output.ports.sort();
+        file_output.banner_response = banner_resp;
 
         self.write_output(settings.os.clone(), file_output);
       }
@@ -654,7 +509,7 @@ impl Arguments {
     else if self.threads > 1 {
       self.init_threads(ip, &mut write_ports, &mut banner_resp);
       
-      if settings.is_valid_output_path == true {             // Checks that output will be written to a valid directory before writing to the disk.
+      if settings.is_valid_output_path == true {       // Checks that output will be written to a valid directory before writing to the disk.
         file_output.host = address.ip().to_string();   // Data structure will be used for creating the json object.
         file_output.ports = write_ports;
         file_output.banner_response = banner_resp;
@@ -672,17 +527,17 @@ impl Arguments {
    *  address: SocketAddr {The ip address and port that will be passed to the connect_timeout function}
    * Returns nothing.
   */
-  pub fn standard_port_scan(&self, address: SocketAddr, write_ports: &mut Vec<u16>) -> () {
+  pub fn standard_port_scan(&self, address: SocketAddr, write_ports: &mut Vec<u16>, banner_resp: &mut Vec<BannerResponse>) -> () {
     match TcpStream::connect_timeout(&address, Duration::from_millis(self.timeout)) {
-      Ok(s) => {
+      Ok(_) => {
         write_ports.push(address.port());
 
-        if let Some(port_name) = service_map(address.port()) {
-          println!("{}: {} - {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright(),
-          style(port_name).cyan());
-        }
-        else {
-          println!("{}: {}", style(format!("{}/tcp", address.port())).yellow().bright(), style("Open").green().bright());
+        if let Some(data) = Self::get_banner(&address, self.timeout, self.debug, self.banner_len) {
+          let mut banner = BannerResponse::new();
+          banner.port = address.port();
+          banner.data = data;
+
+          banner_resp.push(banner);
         }
       },
 
@@ -951,7 +806,7 @@ impl Arguments {
 
     let c_write_ports = write_ports.clone();
     for i in c_write_ports {
-      Self::display_port(i);
+      fmt::f_display_port(i);
     }
 
     println!("");
@@ -1038,16 +893,16 @@ impl Arguments {
     }
   }
 
-  pub fn display_port(port: u16) -> () {
-    if let Some(port_name) = service_map(port) {
-      println!("{}: {} - {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright(),
-      style(port_name).cyan());
-    }
+  // pub fn display_port(port: u16) -> () {
+  //   if let Some(port_name) = service_map(port) {
+  //     println!("{}: {} - {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright(),
+  //     style(port_name).cyan());
+  //   }
 
-    else {
-      println!("{}: {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright())
-    };
-  }
+  //   else {
+  //     println!("{}: {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright())
+  //   };
+  // }
 
   /**Function sends messages from worker thread to the main thread via channels with open ports
    * Params:
