@@ -1,5 +1,5 @@
 mod arguments;
-use arguments::{Arguments, ArgumentSettings, display_help};
+use arguments::{Arguments, display_help, arg_definitions::ArgumentSettings};
 use clap::Parser;
 
 fn main() {
