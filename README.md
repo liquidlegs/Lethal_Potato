@@ -14,11 +14,11 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 - Customizable threads
 - Customizable socket timeout
 - Display verbose output
+- Banner grabbing
+- Export as json
 - Supports Windows and Linux
 
 ## Features to come
-- Banner grabbing
-- Export as json
 - Display the recommended max threads
 - Auto calcuate socket timeout
 - UDP scanning
