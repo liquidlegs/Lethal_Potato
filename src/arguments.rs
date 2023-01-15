@@ -490,9 +490,11 @@ impl Arguments {
         fmt::f_display_port(i);
       }
 
-      println!("");
-      for i in banner_resp.clone() {
-        fmt::f_display_banner(i);
+      if self.banner_grab == true {
+        println!("");
+        for i in banner_resp.clone() {
+          fmt::f_display_banner(i);
+        }
       }
 
       if settings.is_valid_output_path == true {
@@ -503,7 +505,7 @@ impl Arguments {
         self.write_output(settings.os.clone(), file_output);
       }
 
-      println!("\n{}: Scan completed in {:?}\n", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
+      println!("{}: Scan completed in {:?}", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
     }
 
     else if self.threads > 1 {
@@ -517,7 +519,7 @@ impl Arguments {
         self.write_output(settings.os.clone(), file_output);
       }
       
-      println!("\n{}: Scan completed in {:?}\n", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
+      println!("\n{}: Scan completed in {:?}", style("OK").yellow().bright(), style(start_time.elapsed()).cyan())
     }
   }
 
@@ -809,9 +811,11 @@ impl Arguments {
       fmt::f_display_port(i);
     }
 
-    println!("");
-    for i in banner_resp.clone() {
-      println!("Port: {}\nbanner: {}\n", style(i.port).cyan(), style(i.data).cyan());
+    if self.banner_grab == true {
+      println!("");
+      for i in banner_resp.clone() {
+        println!("Port: {}\nbanner: {}\n", style(i.port).cyan(), style(i.data).cyan());
+      }
     }
   }
 
