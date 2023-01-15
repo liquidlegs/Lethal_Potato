@@ -14,13 +14,15 @@ Lethal Potato gets its name because it was written and tested on a 1.60 GHz I5 p
 - Customizable threads
 - Customizable socket timeout
 - Display verbose output
+- Banner grabbing
+- Export as json
 - Supports Windows and Linux
 
 ## Features to come
-- Banner grabbing
-- Export as json
 - Display the recommended max threads
 - Auto calcuate socket timeout
+- UDP scanning
+- IPV6 support
 
 # Compilation Instructions
 1) Download and install rustup https://www.rust-lang.org/
@@ -48,4 +50,4 @@ Lethal Potato was originally written and tested on the windows terminal.
 That being said, I will giving the linux version some love so that it looks bright colourful also.
 
 ## Why are some ports reported as open when nmap reports them as being closed?
-This is a bug. There should be an update that fixes this soon.
+This has been fixed. `git pull` or `git clone` this repository again to update to the latest version.
