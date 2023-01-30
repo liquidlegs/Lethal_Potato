@@ -484,11 +484,7 @@ impl Arguments {
       }
 
       write_ports.sort();
-
-      let c_write_ports = write_ports.clone();
-      for i in c_write_ports {
-        fmt::f_display_port(i);
-      }
+      fmt::f_display_port(&write_ports);
 
       if self.banner_grab == true {
         println!("");
@@ -805,11 +801,7 @@ impl Arguments {
     // Sorts the ports received by the main threads and displays them to the screen.
     println!("");
     write_ports.sort();
-
-    let c_write_ports = write_ports.clone();
-    for i in c_write_ports {
-      fmt::f_display_port(i);
-    }
+    fmt::f_display_port(&write_ports);
 
     if self.banner_grab == true {
       println!("");
