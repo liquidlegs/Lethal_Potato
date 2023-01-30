@@ -5,38 +5,79 @@ pub mod fmt {
   use crate::arguments::service_map;
   use console::style;
   use super::BannerResponse;
+  use comfy_table::{Cell, Color};
 
+  // Function prints errors in the format [Error: {message} {value} {enum}]
   pub fn f_error(msg: &str, value: &str, error_enum: &str) -> () {
     println!("{}: {} {} - {}", style("Error").red().bright(), msg, style(value).cyan(), style(error_enum).red());
   }
 
+  // Function prints dbg messages in the format [debug: {message} {value}]
   pub fn f_debug(msg: &str, value: &str) -> () {
     println!("{} {} {}", style("Debug =>").red().bright(), style(msg).yellow(), style(value).cyan());
   }
 
+  // Function displays banners in format [{port} {content}]
   pub fn f_display_banner(banner: BannerResponse) -> () {
     println!("Port: {}\nbanner: {}\n", style(banner.port).cyan(), style(banner.data).cyan());
   }
 
-  pub fn f_display_port(port: u16) -> () {
-    if let Some(port_name) = service_map(port) {
-      println!("{}: {} - {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright(),
-      style(port_name).cyan());
+  /**Function displays ports in a nicely formatted table
+   * Params:
+   *  ports: &Vec<u16> {The ports to be displayed}
+   * Returns nothing.
+   */
+  pub fn f_display_port(ports: &Vec<u16>) -> () {
+    // Creates a new table and adds the header columns
+    let mut table = comfy_table::Table::new();
+    table.set_header(vec![
+      Cell::new("Port").fg(Color::Red), 
+      Cell::new("State").fg(Color::Red), 
+      Cell::new("Service").fg(Color::Red)
+    ]);
+    
+    let mut port_string = String::new();
+    let mut state_string = String::new();
+    let mut svc_string = String::new();
+
+    // Forms the structure of each of column.
+    for i in ports {
+      port_string.push_str(format!("{i}/tcp\n").as_str());
+      state_string.push_str("Open\n");
+      
+      if let Some(result) = service_map(i.clone()) {
+        svc_string.push_str(result);
+        svc_string.push('\n');
+      }
+
+      else {
+        svc_string.push('\n');
+      }
     }
 
-    else {
-      println!("{}: {}", style(format!("{}/tcp", port)).yellow().bright(), style("Open").green().bright())
-    };
+    // Pops the last newline off the end of each string.
+    port_string.pop();
+    state_string.pop();
+    svc_string.pop();
+
+    // Adds the contents to the table.
+    table.add_row(vec![
+      Cell::new(port_string).fg(Color::Yellow),
+      Cell::new(state_string).fg(Color::Green),
+      Cell::new(svc_string).fg(Color::DarkCyan)
+    ]);
+
+    println!("{table}");
   }
 }
 
 #[derive(Debug, Clone)]
 pub struct Flags {
-  pub debug: bool,
-  pub verbose: bool,
-  pub timeout: u64,
-  pub banner_grab: bool,
-  pub banner_len: u32,
+  pub debug: bool,          // Flag will show debug messages
+  pub verbose: bool,        // Flag will show information
+  pub timeout: u64,         // Flags sets the socket timeout.
+  pub banner_grab: bool,    // Enables banner grabs.
+  pub banner_len: u32,      // Sets the max displayable length in bytes.
 }
 
 
@@ -101,6 +142,7 @@ impl ArgumentSettings {
   }
 }
 
+// Tells the thread what message was received and how to deal with it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThreadMessage {
   OpenPort,
